@@ -175,6 +175,7 @@ jobs:
           releaseName: 'Claude Code Haha v__VERSION__'
           releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          createRelease: true 
           prerelease: false
           updaterJsonPreferNsis: true
           assetNamePattern: ${{ matrix.asset_name_pattern }}
