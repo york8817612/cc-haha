@@ -26,6 +26,10 @@ import { WorkspacePanel } from '../components/workspace/WorkspacePanel'
 import { TeamStatusBar } from '../components/teams/TeamStatusBar'
 import { TerminalSettings } from './TerminalSettings'
 import type { SessionListItem } from '../types/session'
+import { useMobileViewport } from '../hooks/useMobileViewport'
+import { isTauriRuntime } from '../lib/desktopRuntime'
+import type { ActiveGoalState, BackgroundAgentTask } from '../types/chat'
+import { Bot, CheckCircle2, LoaderCircle, Target, XCircle } from 'lucide-react'
 
 const TASK_POLL_INTERVAL_MS = 1000
 const WORKSPACE_RESIZE_STEP = 32
@@ -197,7 +201,167 @@ function TerminalResizeHandle() {
   )
 }
 
+function GoalStatusPanel({
+  goal,
+  isRunning,
+  compact,
+}: {
+  goal: ActiveGoalState
+  isRunning: boolean
+  compact: boolean
+}) {
+  const t = useTranslation()
+  const stateLabel = goal.action === 'completed'
+    ? t('chat.activeGoal.completed')
+    : goal.action === 'paused' || goal.status === 'paused'
+      ? t('chat.activeGoal.paused')
+      : isRunning && goal.status !== 'complete'
+        ? t('chat.activeGoal.running')
+        : t('chat.activeGoal.active')
+  const hasMeta = Boolean(goal.budget || goal.continuations || goal.elapsed)
+
+  return (
+    <div
+      data-testid="active-goal-panel"
+      className={
+        compact
+          ? 'mx-auto w-full max-w-[860px] px-4 py-2'
+          : 'mx-auto w-full max-w-[860px] px-8 py-2.5'
+      }
+    >
+      <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-lg border border-[var(--color-memory-border)] bg-[var(--color-memory-surface)] px-3 py-2">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center text-[var(--color-memory-accent)]">
+          <Target size={15} strokeWidth={2.25} aria-hidden="true" />
+        </span>
+        <span className="shrink-0 text-[13px] font-medium text-[var(--color-text-primary)]">
+          {t('chat.activeGoal.title')}
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1 text-[12px] text-[var(--color-text-tertiary)]">
+          <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-memory-accent)]" aria-hidden="true" />
+          {stateLabel}
+        </span>
+        {goal.objective && (
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--color-text-primary)]">
+            {goal.objective}
+          </span>
+        )}
+        {hasMeta && (
+          <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+            {goal.budget && (
+              <span className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
+                {t('chat.activeGoal.budget', { value: goal.budget })}
+              </span>
+            )}
+            {goal.continuations && (
+              <span className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
+                {t('chat.activeGoal.continuations', { value: goal.continuations })}
+              </span>
+            )}
+            {goal.elapsed && (
+              <span className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
+                {t('chat.activeGoal.elapsed', { value: goal.elapsed })}
+              </span>
+            )}
+          </div>
+        )}
+        {hasMeta && goal.budget ? (
+          <span className="ml-auto shrink-0 text-[11px] font-medium text-[var(--color-text-tertiary)] md:hidden">
+            {t('chat.activeGoal.budget', { value: goal.budget })}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function formatBackgroundTaskDuration(durationMs?: number) {
+  if (typeof durationMs !== 'number' || durationMs < 0) return null
+  const seconds = Math.round(durationMs / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${seconds % 60}s`
+}
+
+function BackgroundAgentTasksPanel({
+  tasks,
+  compact,
+}: {
+  tasks: BackgroundAgentTask[]
+  compact: boolean
+}) {
+  const t = useTranslation()
+  if (tasks.length === 0) return null
+
+  return (
+    <div
+      data-testid="background-agent-panel"
+      className={
+        compact
+          ? 'mx-auto w-full max-w-[860px] px-4 py-2'
+          : 'mx-auto w-full max-w-[860px] px-8 py-2.5'
+      }
+    >
+      <div className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-low)]">
+        <div className="flex min-w-0 items-center gap-2 border-b border-[var(--color-border)] px-3 py-2">
+          <Bot size={15} strokeWidth={2.25} className="shrink-0 text-[var(--color-text-secondary)]" aria-hidden="true" />
+          <span className="shrink-0 text-[13px] font-medium text-[var(--color-text-primary)]">
+            {t('chat.backgroundAgents.title')}
+          </span>
+          <span className="truncate text-[12px] text-[var(--color-text-tertiary)]">
+            {t('chat.backgroundAgents.count', { count: tasks.length })}
+          </span>
+        </div>
+        <div className="divide-y divide-[var(--color-border)]">
+          {tasks.map((task) => {
+            const isRunning = task.status === 'running'
+            const isFailed = task.status === 'failed' || task.status === 'stopped'
+            const duration = formatBackgroundTaskDuration(task.usage?.durationMs)
+            const detail = task.summary || task.lastToolName || task.description || task.outputFile || task.taskId
+            return (
+              <div key={task.taskId} className="flex min-w-0 items-start gap-2 px-3 py-2">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center">
+                  {isRunning ? (
+                    <LoaderCircle size={15} strokeWidth={2.25} className="animate-spin text-[var(--color-accent)]" aria-hidden="true" />
+                  ) : isFailed ? (
+                    <XCircle size={15} strokeWidth={2.25} className="text-[var(--color-error)]" aria-hidden="true" />
+                  ) : (
+                    <CheckCircle2 size={15} strokeWidth={2.25} className="text-[var(--color-success)]" aria-hidden="true" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 text-[12px] font-medium text-[var(--color-text-primary)]">
+                      {task.taskType || t('chat.backgroundAgents.agent')}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-[var(--color-text-tertiary)]">
+                      {t(`chat.backgroundAgents.status.${task.status}`)}
+                    </span>
+                    {task.usage?.totalTokens ? (
+                      <span className="hidden shrink-0 text-[11px] text-[var(--color-text-tertiary)] sm:inline">
+                        {t('chat.backgroundAgents.tokens', { count: task.usage.totalTokens.toLocaleString() })}
+                      </span>
+                    ) : null}
+                    {duration ? (
+                      <span className="hidden shrink-0 text-[11px] text-[var(--color-text-tertiary)] sm:inline">
+                        {duration}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-0.5 truncate text-[12px] text-[var(--color-text-secondary)]">
+                    {detail}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function ActiveSession() {
+  const isMobileLayout = useMobileViewport() && !isTauriRuntime()
   const activeTabId = useTabStore((s) => s.activeTabId)
   const activeTabType = useTabStore((s) => s.tabs.find((tab) => tab.sessionId === s.activeTabId)?.type ?? null)
   const sessions = useSessionStore((s) => s.sessions)
@@ -208,6 +372,16 @@ export function ActiveSession() {
   const trackedTaskSessionId = useCLITaskStore((s) => s.sessionId)
   const hasIncompleteTasks = useCLITaskStore((s) => s.tasks.some((task) => task.status !== 'completed'))
   const chatState = sessionState?.chatState ?? 'idle'
+  const activeGoal = sessionState?.activeGoal ?? null
+  const backgroundAgentTasks = useMemo(
+    () => Object.values(sessionState?.backgroundAgentTasks ?? {})
+      .sort((a, b) => {
+        if (a.status === 'running' && b.status !== 'running') return -1
+        if (a.status !== 'running' && b.status === 'running') return 1
+        return b.updatedAt - a.updatedAt
+      }),
+    [sessionState?.backgroundAgentTasks],
+  )
   const tokenUsage = sessionState?.tokenUsage ?? { input_tokens: 0, output_tokens: 0 }
 
   const session = sessions.find((s) => s.id === activeTabId)
@@ -215,12 +389,12 @@ export function ActiveSession() {
   const activeTeam = useTeamStore((s) => s.activeTeam)
   const isMemberSession = !!memberInfo
   const showWorkspacePanel = useWorkspacePanelStore((state) =>
-    activeTabId && isSessionTabState(activeTabId, activeTabType) && !isMemberSession
+    activeTabId && isSessionTabState(activeTabId, activeTabType) && !isMemberSession && !isMobileLayout
       ? state.isPanelOpen(activeTabId)
       : false,
   )
   const showTerminalPanel = useTerminalPanelStore((state) =>
-    activeTabId && isSessionTabState(activeTabId, activeTabType) && !isMemberSession
+    activeTabId && isSessionTabState(activeTabId, activeTabType) && !isMemberSession && !isMobileLayout
       ? state.isPanelOpen(activeTabId)
       : false,
   )
@@ -260,7 +434,7 @@ export function ActiveSession() {
   const t = useTranslation()
   const messages = sessionState?.messages ?? []
   const streamingText = sessionState?.streamingText ?? ''
-  const isEmpty = messages.length === 0 && !streamingText
+  const isEmpty = messages.length === 0 && !streamingText && (session?.messageCount ?? 0) === 0
 
   const isActive = chatState !== 'idle'
   const totalTokens = tokenUsage.input_tokens + tokenUsage.output_tokens
@@ -281,7 +455,7 @@ export function ActiveSession() {
       <div data-testid="active-session-content-row" className="flex min-h-0 min-w-0 flex-1">
         <div
           data-testid="active-session-chat-column"
-          className={`flex flex-col ${showWorkspacePanel ? CHAT_COLUMN_WITH_WORKSPACE_CLASS : 'min-w-[360px] flex-1'}`}
+          className={`flex flex-col ${showWorkspacePanel ? CHAT_COLUMN_WITH_WORKSPACE_CLASS : isMobileLayout ? 'min-w-0 flex-1' : 'min-w-[360px] flex-1'}`}
         >
           {isMemberSession && (
             <div className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface-container)]">
@@ -355,7 +529,7 @@ export function ActiveSession() {
             </div>
           ) : (
             <>
-              {!isMemberSession && (
+              {!isMemberSession && !isMobileLayout && (
                 <div
                   className={
                     showWorkspacePanel
@@ -416,6 +590,18 @@ export function ActiveSession() {
                   </div>
                 </div>
               )}
+
+              {activeGoal && (
+                <GoalStatusPanel
+                  goal={activeGoal}
+                  isRunning={isActive}
+                  compact={showWorkspacePanel || isMobileLayout}
+                />
+              )}
+              <BackgroundAgentTasksPanel
+                tasks={backgroundAgentTasks}
+                compact={showWorkspacePanel || isMobileLayout}
+              />
 
               <MessageList compact={showWorkspacePanel} />
             </>
